@@ -1,3 +1,4 @@
-﻿[build]
+[build]
   publish = "."
-  command = ""
+
+# 纯静态站点，无构建命令；分支 main，发布目录为仓库根。
