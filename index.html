@@ -1752,7 +1752,7 @@ function pageAssume(){
    '<label>稳态产能利用率<select id="a_util"><option value="80">80%</option><option value="85">85%</option><option value="90" selected>90%</option><option value="95">95%</option></select></label>' +
    '<label>碳价年涨幅<select id="a_carbon"><option value="0">0%</option><option value="5" selected>5%</option><option value="10">10%</option></select></label>' +
    '<label>残值折扣<select id="a_salv"><option value="1">不打折</option><option value="0.8" selected>8 折</option><option value="0.5">5 折</option></select></label>' +
-   '</div><div id="assumeOut"></div></div>' +
+   '</div><div id="assumeOut"></div><div id="npvOut"></div></div>' +
    '<h2>三情景怎么设</h2><div class="scenario" id="scen"></div>' +
    '<p class="hint">情景不是“多算几个数”，而是给决策留余地：基准用于推荐，悲观用于设红线，乐观用于讲空间。</p>' +
    '<div class="source-note">规则来自《市场数据向财务建模因子应用流程》；具体 NPV 请到计算实验室验证。</div>';
@@ -1772,27 +1772,62 @@ function initPlaybookPages(){
   var cagr=$('a_cagr');
   if(!cagr) return;
   function val(id){var e=$(id);return e?e.value:'';}
+  var R=0.08, TAX=0.25, N=10, REV=95, VCR=0.9;
+  var A={capex:2.4,om:0.12,salv:0.12,emis:5.8,sub:0};
+  var B={capex:3.9,om:0.07,salv:0.195,emis:2.3,sub:0.2};
+  function one(o,u,g,carbonG,salvF){
+    var dep=(o.capex-o.salv)/N, npv=-o.capex;
+    for(var t=1;t<=N;t++){
+      var k = Math.max(0.3, Math.min(0.9, 0.625*(g/0.21)));
+      var util = t===1 ? 0.5 : (t===2 ? 0.5+(u-0.5)*k : u);
+      var revenue = REV*util;
+      var price = 100*Math.pow(1+carbonG,t-1);
+      var carbon = o.emis*price/10000;
+      var ebit = revenue*(1-VCR) - o.om - carbon - dep;
+      var ocf = ebit*(1-TAX) + dep;
+      npv += ocf/Math.pow(1+R,t);
+      if(t===N) npv += o.salv*salvF/Math.pow(1+R,t);
+    }
+    if(o.sub) npv += o.sub/(1+R);
+    return npv;
+  }
+  function calc(u,g,carbonG,salvF){
+    var a=one(A,u,g,carbonG,salvF), b=one(B,u,g,carbonG,salvF);
+    return {a:a,b:b,d:a-b};
+  }
   function render(){
-    var g=+val('a_cagr'), u=+val('a_util'), c=+val('a_carbon'), s=+val('a_salv');
+    var g=+val('a_cagr')/100, u=+val('a_util')/100, c=+val('a_carbon')/100, s=+val('a_salv');
     var rows=[
-      ['收入增速','第 1—3 年 '+g+'%（对标储能 CAGR）','储能出货 2025—2030 CAGR 约 21%'],
-      ['产能利用率','第 1 年 50%、第 2 年 75%、第 3 年起 '+u+'%','头部企业接近满产，但留调试与订单波动'],
-      ['单价','0.45 元/Wh','当前市场价，产能过剩下难涨价'],
-      ['变动成本率','90%','案例给定；行业价格战下的保守假设'],
-      ['碳价','100 元/吨，年涨 '+c+'%','全国碳市场纳入，长期上行'],
-      ['残值','账面 × '+s,'技术迭代（固态 2030）下打折扣'],
+      ['行业 CAGR',''+(g*100).toFixed(0)+'%','决定爬坡速度：CAGR 越高，第 2 年爬得越快'],
+      ['产能利用率','第 1 年 50%、第 2 年 '+(Math.round((0.5+(u-0.5)*Math.max(0.3,Math.min(0.9,0.625*(g/0.21))))*100))+'%、第 3 年起 '+(u*100).toFixed(0)+'%','头部接近满产，留调试与订单波动'],
+      ['单价','0.45 元/Wh（满产收入 95 亿）','案例给定口径'],
+      ['变动成本率','90%','价格战下的保守假设'],
+      ['碳价','100 元/吨，年涨 '+(c*100).toFixed(0)+'%','全国碳市场纳入，长期上行'],
+      ['残值','账面 × '+s,'技术迭代（固态 2030）下打折'],
       ['折现率','8%','董事会要求；风险溢价另议']
     ];
-    var html='<div class="table-scroll"><table><tr><th style="width:18%">参数</th><th style="width:26%">取值</th><th>依据</th></tr>' +
+    $('assumeOut').innerHTML='<div class="table-scroll"><table><tr><th style="width:18%">参数</th><th style="width:30%">取值</th><th>依据</th></tr>' +
       rows.map(function(r){return '<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td class="small">'+r[2]+'</td></tr>';}).join('') + '</table></div>';
-    $('assumeOut').innerHTML=html;
-    var scen=[
-      ['基准',g+'%', c+'%','NPV 略低于实验室默认值；A 仍略优，但差距收窄'],
-      ['乐观',(g+3)+'%', (c+5)+'%','需求更旺、碳价更高，B 的反超概率上升'],
-      ['悲观',Math.max(5,g-6)+'%', Math.max(0,c-5)+'%','价格战持续，先保现金流，暂缓扩产']
-    ];
-    $('scen').innerHTML=scen.map(function(x){
-      return '<div class="card"><h3>'+x[0]+'情景</h3><p class="small">增长 '+x[1]+'，碳价年涨 '+x[2]+'</p><p class="small" style="margin-top:6px">'+x[3]+'</p></div>';
+
+    var base=calc(u,g,c,s);
+    var opt=calc(Math.min(0.95,u+0.05), g+0.03, Math.min(0.2,c+0.05), Math.min(1,s+0.1));
+    var pes=calc(Math.max(0.5,u-0.10), Math.max(0.03,g-0.06), Math.max(0,c-0.05), Math.max(0.3,s-0.2));
+    var list=[['基准',u,g,c,s,base],['乐观',Math.min(0.95,u+0.05),g+0.03,Math.min(0.2,c+0.05),Math.min(1,s+0.1),opt],['悲观',Math.max(0.5,u-0.1),Math.max(0.03,g-0.06),Math.max(0,c-0.05),Math.max(0.3,s-0.2),pes]];
+    var html='<h3 style="margin:18px 0 8px">爬坡口径下的十年 NPV（亿元）</h3>' +
+      '<div class="table-scroll"><table><tr><th>情景</th><th class="n">稳态利用率</th><th class="n">行业 CAGR</th><th class="n">碳价年涨</th><th class="n">A NPV</th><th class="n">B NPV</th><th class="n">差额 A−B</th><th>谁更优</th></tr>' +
+      list.map(function(x){
+        var w=x[5].a>=x[5].b?'A':'B';
+        return '<tr><td>'+x[0]+'</td><td class="n">'+(x[1]*100).toFixed(0)+'%</td><td class="n">'+(x[2]*100).toFixed(0)+'%</td><td class="n">'+(x[3]*100).toFixed(0)+'%</td>' +
+          '<td class="n">'+x[5].a.toFixed(2)+'</td><td class="n">'+x[5].b.toFixed(2)+'</td><td class="n">'+x[5].d.toFixed(2)+'</td><td>'+w+'</td></tr>';
+      }).join('') + '</table></div>' +
+      '<p class="small muted">对照：满产口径（第 3 年起 100%）在实验室默认值下是 A 44.95 / B 44.34。爬坡口径更低，是因为前两年只用了 50% 和 75% 的产能——这就是“别第一年就按满产算”的量化代价。</p>' +
+      '<div class="button-row"><a class="btn primary" href="#/lab">用实验室核对</a><a class="btn" href="#/model-map">看五表链条</a></div>';
+    $('npvOut').innerHTML=html;
+
+    $('scen').innerHTML=list.map(function(x){
+      var w=x[5].a>=x[5].b?'A':'B';
+      return '<div class="card"><h3>'+x[0]+'情景</h3><p class="small">利用率 '+(x[1]*100).toFixed(0)+'%、增长 '+(x[2]*100).toFixed(0)+'%、碳价年涨 '+(x[3]*100).toFixed(0)+'%</p>' +
+        '<p class="small" style="margin-top:6px">A '+x[5].a.toFixed(2)+' / B '+x[5].b.toFixed(2)+'，<b>'+w+' 更优</b></p></div>';
     }).join('');
   }
   ['a_cagr','a_util','a_carbon','a_salv'].forEach(function(id){
